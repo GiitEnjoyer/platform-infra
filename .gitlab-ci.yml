@@ -1,0 +1,232 @@
+# IaC pipeline.
+#  MR:   fmt -> validate -> lint -> security -> plan (comment with diff)
+#  main: plan -> apply dev (auto) -> apply prod (manual, protected environment)
+#  schedule: drift detection + weekly FinOps report
+
+stages:
+  - lint
+  - security
+  - plan
+  - apply
+  - report
+
+variables:
+  TF_VERSION: "1.9.8"
+  TG_VERSION: "0.68.7"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TG_NON_INTERACTIVE: "true"
+  TF_PLUGIN_CACHE_DIR: "$CI_PROJECT_DIR/.terraform-plugin-cache"
+
+default:
+  image: alpine/terragrunt:${TF_VERSION}
+  cache:
+    key: tf-plugins-${TF_VERSION}
+    paths:
+      - .terraform-plugin-cache/
+  before_script:
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    - echo "$YC_SA_KEY_JSON" > /tmp/sa.json && export YC_SERVICE_ACCOUNT_KEY_FILE=/tmp/sa.json
+  interruptible: true
+
+.rules_mr: &rules_mr
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+.rules_main: &rules_main
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+
+# ---------------------------------------------------------------- lint
+fmt:
+  stage: lint
+  before_script: []
+  script:
+    - terraform fmt -check -recursive terraform/
+    - terragrunt hclfmt --terragrunt-check --terragrunt-working-dir live/
+  rules:
+    - *rules_mr
+    - *rules_main
+
+validate:
+  stage: lint
+  before_script: []
+  script:
+    - |
+      for m in terraform/modules/*/; do
+        echo "--- $m"
+        terraform -chdir="$m" init -backend=false -input=false >/dev/null
+        terraform -chdir="$m" validate
+      done
+  rules:
+    - *rules_mr
+    - *rules_main
+
+tflint:
+  stage: lint
+  image: ghcr.io/terraform-linters/tflint:v0.53.0
+  before_script: []
+  script:
+    - tflint --init
+    - tflint --recursive --chdir terraform/modules --format compact
+  rules:
+    - *rules_mr
+
+yaml-ansible-lint:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install -q yamllint ansible-core ansible-lint
+  script:
+    - yamllint -c .yamllint.yml .
+    - cd ansible && ansible-galaxy collection install -r requirements.yml >/dev/null && ansible-lint playbooks/site.yml
+  rules:
+    - *rules_mr
+
+alerts-test:
+  stage: lint
+  image:
+    name: prom/prometheus:v2.54.1
+    entrypoint: [""]
+  before_script: []
+  script:
+    - promtool check rules observability/platform-alerts/rules/*.yaml
+    - cd observability/platform-alerts/tests && promtool test rules *_test.yaml
+  rules:
+    - *rules_mr
+
+finops-test:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install -q pytest
+  script:
+    - cd finops && pytest -q
+  rules:
+    - *rules_mr
+
+# ---------------------------------------------------------------- security
+checkov:
+  stage: security
+  image:
+    name: bridgecrew/checkov:3
+    entrypoint: [""]
+  before_script: []
+  script:
+    - checkov -d terraform/modules --framework terraform --quiet --compact
+      --skip-check CKV_YC_4   # public API is intentionally enabled in dev only
+  allow_failure: false
+  rules:
+    - *rules_mr
+
+gitleaks:
+  stage: security
+  image:
+    name: zricethezav/gitleaks:v8.21.1
+    entrypoint: [""]
+  before_script: []
+  script:
+    - gitleaks detect --source . --no-banner --redact
+  rules:
+    - *rules_mr
+
+# ---------------------------------------------------------------- plan
+.plan:
+  stage: plan
+  script:
+    - cd live/${ENV}
+    - set -o pipefail
+    - terragrunt run-all plan -out=tfplan -lock-timeout=5m --terragrunt-parallelism 4 2>&1 | tee plan.log
+    - grep -E "^(Plan:|No changes)" plan.log || true
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - live/${ENV}/**/tfplan
+      - live/${ENV}/plan.log
+  resource_group: tf-${ENV}
+
+plan:dev:
+  extends: .plan
+  variables:
+    ENV: dev
+  rules:
+    - *rules_mr
+    - *rules_main
+
+plan:prod:
+  extends: .plan
+  variables:
+    ENV: prod
+  rules:
+    - *rules_mr
+    - *rules_main
+
+# ---------------------------------------------------------------- apply
+.apply:
+  stage: apply
+  script:
+    - cd live/${ENV}
+    - terragrunt run-all apply tfplan --terragrunt-parallelism 4
+  resource_group: tf-${ENV}
+  interruptible: false
+
+apply:dev:
+  extends: .apply
+  needs: ["plan:dev"]
+  variables:
+    ENV: dev
+  environment:
+    name: dev
+  rules:
+    - *rules_main
+
+apply:prod:
+  extends: .apply
+  needs: ["plan:prod", "apply:dev"]
+  variables:
+    ENV: prod
+  environment:
+    name: prod          # protected: only maintainers can run
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
+      allow_failure: false
+
+# ---------------------------------------------------------------- scheduled
+drift-detection:
+  stage: report
+  parallel:
+    matrix:
+      - ENV: [dev, prod]
+  script:
+    - cd live/${ENV}
+    # -detailed-exitcode: 0 = no changes, 2 = drift
+    - |
+      set +e
+      terragrunt run-all plan -detailed-exitcode -lock=false > drift.log 2>&1
+      rc=$?
+      set -e
+      if [ "$rc" -eq 2 ]; then
+        echo "Drift detected in ${ENV}"
+        wget -qO- --post-data="chat_id=${TELEGRAM_CHAT_ALERTS}&text=Terraform drift detected in ${ENV}: ${CI_PIPELINE_URL}" \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+        exit 1
+      fi
+      exit "$rc"
+  artifacts:
+    when: always
+    paths: ["live/${ENV}/drift.log"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE == "drift"
+
+finops:audit:
+  stage: report
+  image: python:3.12-slim
+  before_script: []
+  script:
+    - mkdir -p reports
+    - python finops/resource_audit.py --url "$PROM_URL" --namespaces "$FINOPS_NAMESPACES" --window 7d > reports/rightsizing.md
+    - cat reports/rightsizing.md | head -n 20
+  artifacts:
+    paths: [reports/]
+    expire_in: 90 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE == "finops"
