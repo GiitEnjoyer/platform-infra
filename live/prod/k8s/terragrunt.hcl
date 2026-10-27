@@ -1,0 +1,10 @@
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+include "envcommon" {
+  path   = "${dirname(find_in_parent_folders("root.hcl"))}/_envcommon/k8s.hcl"
+  expose = true
+}
+
+prevent_destroy = true
