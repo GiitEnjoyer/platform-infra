@@ -1,0 +1,12 @@
+# Logical dumps complement the managed service's physical backups:
+# they allow restoring a single table and are portable to another cloud.
+pg_backup_databases:
+  - orders
+  - catalog
+pg_backup_dir: /var/backups/postgres
+pg_backup_local_retention_days: 3
+pg_backup_vault_path_prefix: "kv/data/postgres/prod-pg"
+pg_backup_s3_primary: "s3://shop-prod-backups/postgres"
+pg_backup_s3_primary_endpoint: "https://storage.yandexcloud.net"
+pg_backup_s3_dr: "s3://shop-prod-pg-dr-backups/postgres"
+pg_backup_textfile_dir: /var/lib/node_exporter/textfile

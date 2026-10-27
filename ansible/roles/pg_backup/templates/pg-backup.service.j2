@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=PostgreSQL logical backup with off-site copy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/pg-backup
+ExecStart=/usr/local/bin/pg-backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

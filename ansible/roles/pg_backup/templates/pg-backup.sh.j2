@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Logical backup of each database -> Yandex Object Storage -> AWS S3 (Object Lock).
+# Exposes metrics via node_exporter textfile collector; alert PostgresBackupTooOld
+# fires when the last successful run is older than 26h.
+set -Eeuo pipefail
+
+BACKUP_DIR="{{ pg_backup_dir }}"
+TEXTFILE="{{ pg_backup_textfile_dir }}/pg_backup.prom"
+VAULT_PREFIX="{{ pg_backup_vault_path_prefix }}"
+S3_PRIMARY="{{ pg_backup_s3_primary }}"
+S3_PRIMARY_ENDPOINT="{{ pg_backup_s3_primary_endpoint }}"
+S3_DR="{{ pg_backup_s3_dr }}"
+RETENTION_DAYS="{{ pg_backup_local_retention_days }}"
+DATABASES=({% for db in pg_backup_databases %}"{{ db }}" {% endfor %})
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+METRICS_TMP="$(mktemp)"
+rc_total=0
+
+log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
+
+write_metrics() {
+  mv "$METRICS_TMP" "$TEXTFILE"
+}
+trap write_metrics EXIT
+
+{
+  echo "# HELP pg_backup_last_success_timestamp_seconds Last successful backup per database"
+  echo "# TYPE pg_backup_last_success_timestamp_seconds gauge"
+  echo "# HELP pg_backup_size_bytes Size of the last backup archive"
+  echo "# TYPE pg_backup_size_bytes gauge"
+  echo "# HELP pg_backup_duration_seconds Duration of the last backup"
+  echo "# TYPE pg_backup_duration_seconds gauge"
+} >> "$METRICS_TMP"
+
+for db in "${DATABASES[@]}"; do
+  start=$(date +%s)
+  file="${BACKUP_DIR}/${db}-${STAMP}.dump.zst"
+
+  creds="$(vault kv get -format=json "${VAULT_PREFIX}/${db}" | jq -r '.data.data')"
+  export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE PGSSLMODE
+  PGHOST="$(jq -r .ro_host <<<"$creds")"   # dump from a replica, not from primary
+  PGPORT="$(jq -r .port <<<"$creds")"
+  PGUSER="$(jq -r .username <<<"$creds")"
+  PGPASSWORD="$(jq -r .password <<<"$creds")"
+  PGDATABASE="$db"
+  PGSSLMODE=require
+
+  log "dumping ${db}"
+  if pg_dump --format=custom --no-owner --compress=0 | zstd -T0 -10 -q -o "$file" \
+     && aws s3 cp --only-show-errors --endpoint-url "$S3_PRIMARY_ENDPOINT" "$file" "${S3_PRIMARY}/${db}/" \
+     && aws s3 cp --only-show-errors "$file" "${S3_DR}/${db}/"; then
+    end=$(date +%s)
+    size=$(stat -c %s "$file")
+    echo "pg_backup_last_success_timestamp_seconds{db=\"${db}\"} ${end}" >> "$METRICS_TMP"
+    echo "pg_backup_size_bytes{db=\"${db}\"} ${size}" >> "$METRICS_TMP"
+    echo "pg_backup_duration_seconds{db=\"${db}\"} $((end - start))" >> "$METRICS_TMP"
+    log "ok ${db}: ${size} bytes in $((end - start))s"
+  else
+    log "FAILED ${db}"
+    rc_total=1
+  fi
+  unset PGPASSWORD
+done
+
+find "$BACKUP_DIR" -name '*.dump.zst' -mtime +"$RETENTION_DAYS" -delete
+exit "$rc_total"

@@ -1,0 +1,49 @@
+- name: Add HashiCorp apt repository (vault CLI)
+  ansible.builtin.deb822_repository:
+    name: hashicorp
+    types: deb
+    uris: https://apt.releases.hashicorp.com
+    suites: "{{ ansible_distribution_release }}"
+    components: main
+    signed_by: https://apt.releases.hashicorp.com/gpg
+
+- name: Install PostgreSQL client and tooling
+  ansible.builtin.apt:
+    name:
+      - vault
+      - postgresql-client-16
+      - awscli
+      - zstd
+      - jq
+    state: present
+    update_cache: true
+
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ pg_backup_dir }}"
+    state: directory
+    owner: root
+    mode: "0700"
+
+- name: Install backup script
+  ansible.builtin.template:
+    src: pg-backup.sh.j2
+    dest: /usr/local/bin/pg-backup.sh
+    mode: "0750"
+
+- name: Install systemd service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - pg-backup.service
+    - pg-backup.timer
+  notify: Reload systemd
+
+- name: Enable backup timer
+  ansible.builtin.systemd:
+    name: pg-backup.timer
+    state: started
+    enabled: true
+    daemon_reload: true
