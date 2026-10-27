@@ -12,6 +12,13 @@ injector:
 
 server:
   {{- if eq .Values.env "prod" }}
+  # The upstream hashicorp/vault image has no "yandexcloudkms" seal; Yandex Cloud
+  # ships a build with it. Tag is pinned per environment (no :latest in prod).
+  # The pod authenticates to KMS via the node service account (metadata service),
+  # which needs kms.keys.encrypterDecrypter on the unseal key.
+  image:
+    repository: cr.yandex/yc/vault
+    tag: {{ requiredEnv "VAULT_IMAGE_TAG" | quote }}
   ha:
     enabled: true
     replicas: 3
