@@ -1,0 +1,121 @@
+# Developers: read everything in their namespace, exec/port-forward for debugging,
+# no access to Secrets (they live in Vault anyway).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: shop
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io", "policy"]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - deployments
+      - replicasets
+      - statefulsets
+      - jobs
+      - cronjobs
+      - horizontalpodautoscalers
+      - ingresses
+      - poddisruptionbudgets
+      - events
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "deployments"]
+    verbs: ["patch"]   # rollout restart / manual scale during incidents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developers
+  namespace: shop
+subjects:
+  - kind: Group
+    name: shop-developers   # mapped from the cloud IAM group
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io
+---
+# CI deployer: can only manage application objects in its namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-deployer
+  namespace: shop
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer
+  namespace: shop
+rules:
+  - apiGroups: ["", "apps", "autoscaling", "networking.k8s.io", "policy", "batch"]
+    resources:
+      - deployments
+      - services
+      - configmaps
+      - serviceaccounts
+      - ingresses
+      - horizontalpodautoscalers
+      - poddisruptionbudgets
+      - networkpolicies
+      - jobs
+      - secrets   # Helm release metadata is stored in Secrets
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.coreos.com", "operator.victoriametrics.com"]
+    resources: ["servicemonitors", "vmservicescrapes", "vmrules"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-deployer
+  namespace: shop
+subjects:
+  - kind: ServiceAccount
+    name: gitlab-deployer
+    namespace: shop
+roleRef:
+  kind: Role
+  name: deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# On-call SRE: cluster-wide read + node maintenance.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-oncall
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch"]          # cordon / uncordon
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]         # drain
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sre-oncall
+subjects:
+  - kind: Group
+    name: sre
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: sre-oncall
+  apiGroup: rbac.authorization.k8s.io

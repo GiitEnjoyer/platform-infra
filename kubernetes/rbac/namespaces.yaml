@@ -1,0 +1,50 @@
+# Namespace per team/product. Quotas cap blast radius of a bad deploy and
+# make cost attribution trivial (FinOps reports group by namespace label `team`).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels:
+    team: commerce
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute
+  namespace: shop
+spec:
+  hard:
+    requests.cpu: "64"
+    requests.memory: 128Gi
+    limits.memory: 192Gi
+    persistentvolumeclaims: "10"
+    services.loadbalancers: "0"   # only ingress-nginx exposes traffic
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: shop
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        memory: 256Mi
+      max:
+        memory: 8Gi
+---
+# Default deny; services open only what they need via their own NetworkPolicies (Helm chart).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
