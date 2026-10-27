@@ -1,0 +1,28 @@
+groups:
+  - name: postgres-backup
+    rules:
+      - alert: PostgresBackupTooOld
+        expr: time() - pg_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful logical backup of {{ $labels.db }} for more than 26h"
+          runbook_url: https://github.com/GiitEnjoyer/platform-infra/blob/main/docs/runbooks/postgres-backup.md
+
+      - alert: PostgresBackupMissing
+        expr: absent(pg_backup_last_success_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup metrics are missing: backup worker or node_exporter textfile collector is down"
+
+      - alert: PostgresBackupSizeDropped
+        expr: |
+          pg_backup_size_bytes < 0.5 * max_over_time(pg_backup_size_bytes[7d])
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup of {{ $labels.db }} is less than half its weekly max: possible data loss or broken dump"

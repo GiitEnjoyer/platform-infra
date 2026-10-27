@@ -1,0 +1,117 @@
+{
+  "title": "Platform / Cluster overview",
+  "uid": "platform-overview",
+  "tags": ["platform", "capacity", "finops"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "VictoriaMetrics", "value": "VictoriaMetrics" }
+      },
+      {
+        "name": "cluster",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(kube_node_info, cluster)",
+        "refresh": 2
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(kube_namespace_labels{cluster=\"$cluster\"}, namespace)",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ingress RPS",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(rate(nginx_ingress_controller_requests{cluster=\"$cluster\"}[2m]))", "legendFormat": "rps" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 0 } }
+    },
+    {
+      "type": "stat",
+      "title": "Ingress 5xx ratio",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(rate(nginx_ingress_controller_requests{cluster=\"$cluster\",status=~\"5..\"}[5m])) / sum(rate(nginx_ingress_controller_requests{cluster=\"$cluster\"}[5m]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.001 }, { "color": "red", "value": 0.005 }] }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "p99 latency (ingress)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{cluster=\"$cluster\"}[5m])))" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+    {
+      "type": "stat",
+      "title": "Nodes ready / total",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(kube_node_status_condition{cluster=\"$cluster\",condition=\"Ready\",status=\"true\"})", "legendFormat": "ready" },
+        { "expr": "count(kube_node_info{cluster=\"$cluster\"})", "legendFormat": "total" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU: requests vs actual usage by namespace (overprovisioning)",
+      "description": "Gap between the lines is paid but unused capacity. Input for finops/resource_audit.py.",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "namespace:cpu_requests:sum{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{namespace}} requests" },
+        { "expr": "namespace:cpu_usage:rate5m{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{namespace}} usage" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "cores" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory: requests vs working set by namespace",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "namespace:memory_requests:sum{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{namespace}} requests" },
+        { "expr": "namespace:memory_working_set:sum{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{namespace}} working set" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "HPA replicas (current / max)",
+      "gridPos": { "x": 0, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "kube_horizontalpodautoscaler_status_current_replicas{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{horizontalpodautoscaler}} current" },
+        { "expr": "kube_horizontalpodautoscaler_spec_max_replicas{cluster=\"$cluster\",namespace=~\"$namespace\"}", "legendFormat": "{{horizontalpodautoscaler}} max" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pod restarts (15m)",
+      "gridPos": { "x": 12, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total{cluster=\"$cluster\",namespace=~\"$namespace\"}[15m])) > 0", "legendFormat": "{{namespace}}/{{pod}}" }]
+    }
+  ]
+}

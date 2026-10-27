@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-alerts
+description: Platform alerting rules packaged as VMRule objects (rules/ are plain Prometheus rule files, unit-tested with promtool)
+type: application
+version: 0.3.0

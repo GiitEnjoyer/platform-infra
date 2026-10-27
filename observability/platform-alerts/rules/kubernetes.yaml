@@ -1,0 +1,61 @@
+groups:
+  - name: workloads
+    rules:
+      - alert: PodCrashLooping
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) restarted {{ $value | humanize }} times in 15m"
+          runbook_url: https://github.com/GiitEnjoyer/platform-infra/blob/main/docs/runbooks/pod-crashloop.md
+
+      - alert: DeploymentReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+          and changes(kube_deployment_status_replicas_updated[10m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas for 15m"
+
+      - alert: HPAMaxedOut
+        expr: |
+          kube_horizontalpodautoscaler_status_current_replicas
+            == on (namespace, horizontalpodautoscaler) kube_horizontalpodautoscaler_spec_max_replicas
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is at max replicas for 30m: capacity limit reached"
+
+      - alert: ContainerOOMKilled
+        expr: |
+          increase(kube_pod_container_status_restarts_total[10m]) > 0
+          and on (namespace, pod, container) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) was OOMKilled: memory limit too low"
+
+  - name: capacity
+    rules:
+      - record: namespace:cpu_requests:sum
+        expr: sum by (namespace) (kube_pod_container_resource_requests{resource="cpu"})
+      - record: namespace:cpu_usage:rate5m
+        expr: sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=""}[5m]))
+      - record: namespace:memory_requests:sum
+        expr: sum by (namespace) (kube_pod_container_resource_requests{resource="memory"})
+      - record: namespace:memory_working_set:sum
+        expr: sum by (namespace) (container_memory_working_set_bytes{container!=""})
+
+      - alert: ClusterCPUOvercommitted
+        expr: |
+          sum(kube_pod_container_resource_requests{resource="cpu"})
+            / sum(kube_node_status_allocatable{resource="cpu"}) > 0.9
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU requests exceed 90% of allocatable; autoscaler is at its node limit or pods are pending"

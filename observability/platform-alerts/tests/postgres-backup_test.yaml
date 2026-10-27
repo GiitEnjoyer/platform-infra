@@ -1,0 +1,35 @@
+# Run: promtool test rules observability/platform-alerts/tests/*_test.yaml
+rule_files:
+  - ../rules/postgres-backup.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: fresh backup does not alert
+    interval: 1m
+    input_series:
+      - series: 'pg_backup_last_success_timestamp_seconds{db="orders"}'
+        values: "0+60x1800"   # always fresh
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: PostgresBackupTooOld
+        exp_alerts: []
+
+  - name: stale backup fires after 26h + for
+    interval: 1m
+    input_series:
+      - series: 'pg_backup_last_success_timestamp_seconds{db="orders"}'
+        values: "0x1800"      # stuck at t=0 for 30h
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: PostgresBackupTooOld
+        exp_alerts: []
+      - eval_time: 27h
+        alertname: PostgresBackupTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              db: orders
+            exp_annotations:
+              summary: "No successful logical backup of orders for more than 26h"
+              runbook_url: https://github.com/GiitEnjoyer/platform-infra/blob/main/docs/runbooks/postgres-backup.md

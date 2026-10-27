@@ -1,0 +1,76 @@
+# Template for secrets/<env>/alertmanager.yaml (the real file is sops-encrypted).
+# Routing policy:
+#   critical -> Opsgenie (pages on-call) + Telegram
+#   warning  -> Telegram only, grouped, no night pages
+#   Watchdog -> dead man's switch in Opsgenie heartbeat
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+      opsgenie_api_url: https://api.opsgenie.com/
+
+    route:
+      receiver: telegram-warnings
+      group_by: [alertname, namespace, cluster]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - matchers: [alertname = "Watchdog"]
+          receiver: opsgenie-heartbeat
+          repeat_interval: 1m
+          group_interval: 1m
+        - matchers: [severity = "critical"]
+          receiver: opsgenie-critical
+          repeat_interval: 1h
+          continue: true
+        - matchers: [severity = "critical"]
+          receiver: telegram-critical
+        - matchers: [severity = "info"]
+          receiver: "null"
+
+    inhibit_rules:
+      # A whole node is down: don't spam with every pod on it.
+      - source_matchers: [alertname = "KubeNodeNotReady"]
+        target_matchers: [severity = "warning"]
+        equal: [node]
+      - source_matchers: [severity = "critical"]
+        target_matchers: [severity = "warning"]
+        equal: [alertname, namespace]
+
+    receivers:
+      - name: "null"
+      - name: opsgenie-critical
+        opsgenie_configs:
+          - api_key: ${OPSGENIE_API_KEY}
+            priority: P1
+            message: "[{{ .CommonLabels.cluster }}] {{ .CommonLabels.alertname }}"
+            description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
+            tags: "{{ .CommonLabels.cluster }},{{ .CommonLabels.namespace }}"
+      - name: opsgenie-heartbeat
+        webhook_configs:
+          - url: https://api.opsgenie.com/v2/heartbeats/k8s-${CLUSTER}/ping
+            http_config:
+              authorization:
+                type: GenieKey
+                credentials: ${OPSGENIE_API_KEY}
+      - name: telegram-critical
+        telegram_configs:
+          - bot_token: ${TELEGRAM_BOT_TOKEN}
+            chat_id: ${TELEGRAM_CHAT_ONCALL}
+            parse_mode: HTML
+            message: |
+              🔴 <b>{{ .Status | toUpper }}</b> {{ .CommonLabels.alertname }} [{{ .CommonLabels.cluster }}]
+              {{ range .Alerts }}• {{ .Annotations.summary }}
+              {{ if .Annotations.runbook_url }}<a href="{{ .Annotations.runbook_url }}">runbook</a>{{ end }}
+              {{ end }}
+      - name: telegram-warnings
+        telegram_configs:
+          - bot_token: ${TELEGRAM_BOT_TOKEN}
+            chat_id: ${TELEGRAM_CHAT_ALERTS}
+            parse_mode: HTML
+            send_resolved: true
+            message: |
+              {{ if eq .Status "firing" }}🟡{{ else }}✅{{ end }} <b>{{ .CommonLabels.alertname }}</b> [{{ .CommonLabels.cluster }}]
+              {{ range .Alerts }}• {{ .Annotations.summary }}
+              {{ end }}
