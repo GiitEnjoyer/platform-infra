@@ -1,0 +1,5 @@
+common_admin_users:
+  - name: deploy
+    ssh_keys_url: "https://gitlab.example.internal/deploy.keys"
+common_timezone: Europe/Moscow
+node_exporter_version: "1.8.2"

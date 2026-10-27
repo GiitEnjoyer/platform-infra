@@ -1,0 +1,27 @@
+common_timezone: UTC
+common_ntp_servers:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+common_admin_users: []
+common_packages:
+  - curl
+  - jq
+  - htop
+  - iotop
+  - sysstat
+  - unattended-upgrades
+  - fail2ban
+  - chrony
+common_ssh_port: 22
+common_unattended_upgrades: true
+# Kernel tuning for proxies and high connection-rate services.
+common_sysctl:
+  net.core.somaxconn: 65535
+  net.core.netdev_max_backlog: 16384
+  net.ipv4.tcp_max_syn_backlog: 8192
+  net.ipv4.ip_local_port_range: "1024 65000"
+  net.ipv4.tcp_tw_reuse: 1
+  net.ipv4.tcp_fin_timeout: 15
+  fs.file-max: 2097152
+  vm.swappiness: 10
+common_nofile_limit: 1048576

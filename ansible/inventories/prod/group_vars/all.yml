@@ -1,0 +1,13 @@
+common_admin_users:
+  - name: deploy
+    ssh_keys_url: "https://gitlab.example.internal/deploy.keys"
+common_timezone: Europe/Moscow
+common_ntp_servers:
+  - 0.ru.pool.ntp.org
+  - 1.ru.pool.ntp.org
+node_exporter_version: "1.8.2"
+# Collectors that matter for capacity planning; others off to keep cardinality low.
+node_exporter_collectors_enabled:
+  - systemd
+  - processes
+  - tcpstat

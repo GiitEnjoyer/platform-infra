@@ -1,0 +1,12 @@
+- name: Baseline for every host
+  hosts: all
+  become: true
+  roles:
+    - role: common
+    - role: node_exporter
+
+- name: Backup workers (PostgreSQL logical dumps + off-site sync)
+  hosts: backup_workers
+  become: true
+  roles:
+    - role: pg_backup
