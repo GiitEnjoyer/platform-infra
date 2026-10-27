@@ -1,0 +1,86 @@
+# Mirror of the GitLab lint stage so the repository is verifiable on GitHub too.
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [vpc, k8s-cluster, postgresql, aws-dr-bucket]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: fmt
+        run: terraform fmt -check -recursive terraform/
+      - name: validate
+        working-directory: terraform/modules/${{ matrix.module }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+  tflint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-linters/setup-tflint@v4
+      - run: tflint --init && tflint --recursive --chdir terraform/modules --format compact
+
+  yaml-ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yamllint ansible-core ansible-lint
+      - run: yamllint -c .yamllint.yml .
+      - working-directory: ansible
+        run: |
+          ansible-galaxy collection install -r requirements.yml
+          ansible-lint playbooks/site.yml
+
+  alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint promtool prom/prometheus:v2.54.1 \
+            check rules observability/platform-alerts/rules/infrastructure.yaml \
+                        observability/platform-alerts/rules/kubernetes.yaml \
+                        observability/platform-alerts/rules/postgres-backup.yaml
+          docker run --rm -v "$PWD:/w" -w /w/observability/platform-alerts/tests --entrypoint promtool \
+            prom/prometheus:v2.54.1 test rules postgres-backup_test.yaml
+      - uses: azure/setup-helm@v4
+      - run: |
+          helm lint observability/platform-alerts
+          helm lint kubernetes/platform/charts/cluster-issuers
+
+  finops:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest && cd finops && pytest -q
+
+  checkov:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrew/checkov-action@v12
+        with:
+          directory: terraform/modules
+          framework: terraform
+          soft_fail: true
