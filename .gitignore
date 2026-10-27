@@ -1,0 +1,17 @@
+.terraform/
+.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+.terragrunt-cache/
+*.auto.tfvars
+secrets*.yaml
+!kubernetes/**/secrets-template.yaml
+kubeconfig*
+.vault-token
+__pycache__/
+.pytest_cache/
+.venv/
+*.retry
+reports/
