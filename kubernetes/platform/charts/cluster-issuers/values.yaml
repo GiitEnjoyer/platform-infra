@@ -1,0 +1,3 @@
+acmeServer: https://acme-staging-v02.api.letsencrypt.org/directory
+email: platform@example.com
+ingressClass: nginx

@@ -1,0 +1,67 @@
+global:
+  enabled: true
+
+injector:
+  enabled: true
+  replicas: {{ .Values.replicas }}
+  # Sidecar renders secrets to /vault/secrets/*; app pods never get a Vault token in env.
+  agentDefaults:
+    cpuRequest: 10m
+    memRequest: 32Mi
+    memLimit: 64Mi
+
+server:
+  {{- if eq .Values.env "prod" }}
+  ha:
+    enabled: true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        listener "tcp" {
+          tls_disable     = 1
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+        storage "raft" {
+          path = "/vault/data"
+          retry_join { leader_api_addr = "http://vault-0.vault-internal:8200" }
+          retry_join { leader_api_addr = "http://vault-1.vault-internal:8200" }
+          retry_join { leader_api_addr = "http://vault-2.vault-internal:8200" }
+        }
+        # Auto-unseal with Yandex KMS: no manual unseal keys after pod restarts.
+        seal "yandexcloudkms" {
+          kms_key_id = "{{ env "VAULT_KMS_KEY_ID" }}"
+        }
+        service_registration "kubernetes" {}
+  {{- else }}
+  dev:
+    enabled: true
+  {{- end }}
+  dataStorage:
+    enabled: true
+    storageClass: {{ .Values.storageClass }}
+    size: 10Gi
+  auditStorage:
+    enabled: {{ eq .Values.env "prod" }}
+    storageClass: {{ .Values.storageClass }}
+    size: 10Gi
+  affinity: |
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+              component: server
+          topologyKey: topology.kubernetes.io/zone
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+ui:
+  enabled: true

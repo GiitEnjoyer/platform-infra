@@ -1,0 +1,6 @@
+# secrets/<env>/*.yaml are encrypted with a Yandex KMS-backed age key held in CI.
+creation_rules:
+  - path_regex: secrets/prod/.*\.yaml$
+    age: age1prodexamplepublickeyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  - path_regex: secrets/dev/.*\.yaml$
+    age: age1devexamplepublickeyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

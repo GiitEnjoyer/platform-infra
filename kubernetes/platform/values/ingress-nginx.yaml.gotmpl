@@ -1,0 +1,59 @@
+controller:
+  replicaCount: {{ .Values.replicas }}
+  minAvailable: 1
+  ingressClassResource:
+    name: nginx
+    default: true
+
+  autoscaling:
+    enabled: {{ eq .Values.env "prod" }}
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 65
+
+  # Spread controllers across zones: an AZ outage must not drop all ingress capacity.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+          app.kubernetes.io/component: controller
+
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local   # preserves client IP, avoids extra hop
+
+  config:
+    use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
+    keep-alive-requests: "10000"
+    upstream-keepalive-connections: "320"
+    upstream-keepalive-requests: "10000"
+    max-worker-connections: "65536"
+    worker-processes: "auto"
+    proxy-body-size: "16m"
+    ssl-protocols: "TLSv1.2 TLSv1.3"
+    enable-opentelemetry: "false"
+    log-format-escape-json: "true"
+    log-format-upstream: '{"time":"$time_iso8601","remote_addr":"$remote_addr","request_id":"$req_id","host":"$host","method":"$request_method","uri":"$uri","status":$status,"bytes":$bytes_sent,"duration":$request_time,"upstream":"$upstream_addr","upstream_status":"$upstream_status","upstream_duration":"$upstream_response_time","canary":"$proxy_upstream_name"}'
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  # Graceful shutdown: let LB health checks drain the node before nginx stops.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["/wait-shutdown"]
+  terminationGracePeriodSeconds: 300

@@ -1,0 +1,99 @@
+# Platform services installed into every cluster.
+# Usage: helmfile -e dev apply   |   helmfile -e prod diff
+environments:
+  dev:
+    values:
+      - env: dev
+        domain: dev.shop.example.com
+        replicas: 1
+        storageClass: yc-network-hdd
+        acmeServer: https://acme-staging-v02.api.letsencrypt.org/directory
+  prod:
+    values:
+      - env: prod
+        domain: shop.example.com
+        replicas: 3
+        storageClass: yc-network-ssd
+        acmeServer: https://acme-v02.api.letsencrypt.org/directory
+
+---
+repositories:
+  - name: ingress-nginx
+    url: https://kubernetes.github.io/ingress-nginx
+  - name: jetstack
+    url: https://charts.jetstack.io
+  - name: vm
+    url: https://victoriametrics.github.io/helm-charts
+  - name: hashicorp
+    url: https://helm.releases.hashicorp.com
+  - name: fairwinds
+    url: https://charts.fairwinds.com/stable
+
+helmDefaults:
+  wait: true
+  atomic: true
+  timeout: 600
+  createNamespace: true
+
+releases:
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: v1.16.1
+    values:
+      - values/cert-manager.yaml.gotmpl
+
+  - name: cluster-issuers
+    namespace: cert-manager
+    chart: ./charts/cluster-issuers
+    needs:
+      - cert-manager/cert-manager
+    values:
+      - acmeServer: {{ .Values.acmeServer }}
+        email: platform@example.com
+
+  - name: ingress-nginx
+    namespace: ingress-nginx
+    chart: ingress-nginx/ingress-nginx
+    version: 4.11.3
+    values:
+      - values/ingress-nginx.yaml.gotmpl
+
+  - name: vm-stack
+    namespace: monitoring
+    chart: vm/victoria-metrics-k8s-stack
+    version: 0.27.6
+    values:
+      - values/victoria-metrics.yaml.gotmpl
+    secrets:
+      - secrets/{{ .Environment.Name }}/alertmanager.yaml
+
+  - name: platform-alerts
+    namespace: monitoring
+    chart: ../../observability/platform-alerts
+    needs:
+      - monitoring/vm-stack
+
+  - name: vault
+    namespace: vault
+    chart: hashicorp/vault
+    version: 0.28.1
+    values:
+      - values/vault.yaml.gotmpl
+
+  - name: vpa
+    namespace: kube-system
+    chart: fairwinds/vpa
+    version: 4.6.0
+    values:
+      - recommender:
+          extraArgs:
+            pod-recommendation-min-cpu-millicores: 15
+            pod-recommendation-min-memory-mb: 32
+            storage: prometheus
+            prometheus-address: http://vmsingle-vm-stack-victoria-metrics-k8s-stack.monitoring.svc:8429
+        # Updater off: VPA only recommends, changes go through Git (see finops/).
+        updater:
+          enabled: false
+        admissionController:
+          enabled: false

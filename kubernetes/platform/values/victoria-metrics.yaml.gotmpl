@@ -1,0 +1,77 @@
+# VictoriaMetrics instead of Prometheus: ~5-7x less RAM for the same series count,
+# long retention without Thanos, PromQL-compatible (MetricsQL).
+fullnameOverride: vm-stack-victoria-metrics-k8s-stack
+
+vmsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "{{ if eq .Values.env "prod" }}90d{{ else }}14d{{ end }}"
+    replicaCount: 1
+    extraArgs:
+      dedup.minScrapeInterval: 30s
+      search.maxUniqueTimeseries: "3000000"
+    storage:
+      storageClassName: {{ .Values.storageClass }}
+      resources:
+        requests:
+          storage: {{ if eq .Values.env "prod" }}200Gi{{ else }}20Gi{{ end }}
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+      limits:
+        memory: 8Gi
+
+vmagent:
+  spec:
+    scrapeInterval: 30s
+    externalLabels:
+      cluster: {{ .Values.env }}
+    # Drop high-cardinality series nobody queries (FinOps: storage + CPU).
+    inlineRelabelConfig:
+      - action: drop
+        source_labels: [__name__]
+        regex: "apiserver_request_body_size_bytes_bucket|etcd_request_duration_seconds_bucket|rest_client_rate_limiter_duration_seconds_bucket"
+
+vmalert:
+  spec:
+    evaluationInterval: 30s
+    extraArgs:
+      external.url: https://grafana.{{ .Values.domain }}
+
+alertmanager:
+  spec:
+    replicaCount: {{ .Values.replicas }}
+  # config comes from secrets/<env>/alertmanager.yaml (sops-encrypted),
+  # template: observability/alertmanager/alertmanager.yaml
+
+grafana:
+  enabled: true
+  replicas: 1
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    hosts:
+      - grafana.{{ .Values.domain }}
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.{{ .Values.domain }}
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+  persistence:
+    enabled: true
+    storageClassName: {{ .Values.storageClass }}
+    size: 5Gi
+
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - pods=[app.kubernetes.io/name,app.kubernetes.io/version,track]
+    - deployments=[app.kubernetes.io/name,team]
+
+defaultRules:
+  create: true

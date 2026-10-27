@@ -1,0 +1,27 @@
+crds:
+  enabled: true
+replicaCount: {{ .Values.replicas }}
+podDisruptionBudget:
+  enabled: {{ gt (int .Values.replicas) 1 }}
+  minAvailable: 1
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: true
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: system
+    effect: NoSchedule
+nodeSelector:
+{{- if eq .Values.env "prod" }}
+  role: system
+{{- else }}
+  {}
+{{- end }}
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
