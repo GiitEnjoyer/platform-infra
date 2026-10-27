@@ -1,0 +1,64 @@
+# Filebeat DaemonSet (elastic/filebeat chart): container logs -> Elasticsearch.
+# Cost levers (see docs/architecture.md, FinOps):
+#   * probe/metrics requests and debug lines are dropped at the edge, never indexed;
+#   * JSON app logs are decoded into fields, so no expensive grok in ingest pipelines;
+#   * separate data streams per log class with different ILM retention.
+daemonset:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      memory: 300Mi
+  tolerations:
+    - operator: Exists          # run on system/batch nodes too
+
+  filebeatConfig:
+    filebeat.yml: |
+      filebeat.autodiscover:
+        providers:
+          - type: kubernetes
+            node: ${NODE_NAME}
+            hints.enabled: true
+            hints.default_config:
+              type: filestream
+              id: container-${data.kubernetes.container.id}
+              paths:
+                - /var/log/containers/*-${data.kubernetes.container.id}.log
+              parsers:
+                - container: ~
+
+      processors:
+        - decode_json_fields:
+            fields: ["message"]
+            target: ""
+            overwrite_keys: true
+            add_error_key: true
+        # Health checks and scrapes: high volume, zero diagnostic value.
+        - drop_event:
+            when:
+              or:
+                - regexp.path: "^/(healthz|readyz|metrics)$"
+                - regexp.uri: "^/(healthz|readyz|metrics)$"
+        - drop_event:
+            when:
+              and:
+                - equals.level: "DEBUG"
+                - not.equals.kubernetes.namespace: "shop-dev"
+        - drop_fields:
+            fields: ["agent", "ecs", "input", "log.offset", "kubernetes.node.labels", "kubernetes.namespace_labels"]
+            ignore_missing: true
+
+      output.elasticsearch:
+        hosts: ["https://elasticsearch.logging.svc:9200"]
+        username: ${ES_USERNAME}
+        password: ${ES_PASSWORD}
+        indices:
+          - index: "logs-ingress-%{[agent.version]}"
+            when.equals.kubernetes.namespace: "ingress-nginx"
+          - index: "logs-audit-%{[agent.version]}"
+            when.has_fields: ["audit"]
+        index: "logs-app-%{[agent.version]}"
+
+      setup.ilm.enabled: false   # policies are managed in observability/logging/ilm/
+      setup.template.enabled: false

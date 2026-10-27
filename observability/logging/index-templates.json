@@ -1,0 +1,149 @@
+[
+  {
+    "name": "logs-app",
+    "body": {
+      "index_patterns": [
+        "logs-app-*"
+      ],
+      "data_stream": {},
+      "priority": 200,
+      "template": {
+        "settings": {
+          "index.lifecycle.name": "logs-app",
+          "number_of_shards": 3,
+          "number_of_replicas": 1,
+          "index.codec": "best_compression",
+          "index.mapping.total_fields.limit": 500
+        },
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keyword": {
+                "match_mapping_type": "string",
+                "mapping": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            }
+          ],
+          "properties": {
+            "@timestamp": {
+              "type": "date"
+            },
+            "message": {
+              "type": "text"
+            },
+            "duration": {
+              "type": "long"
+            },
+            "status": {
+              "type": "short"
+            }
+          }
+        }
+      },
+      "_meta": {
+        "description": "Data stream for logs-app-*; lifecycle policy logs-app. Apply: PUT _index_template/logs-app"
+      }
+    }
+  },
+  {
+    "name": "logs-ingress",
+    "body": {
+      "index_patterns": [
+        "logs-ingress-*"
+      ],
+      "data_stream": {},
+      "priority": 200,
+      "template": {
+        "settings": {
+          "index.lifecycle.name": "logs-ingress",
+          "number_of_shards": 6,
+          "number_of_replicas": 1,
+          "index.codec": "best_compression",
+          "index.mapping.total_fields.limit": 500
+        },
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keyword": {
+                "match_mapping_type": "string",
+                "mapping": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            }
+          ],
+          "properties": {
+            "@timestamp": {
+              "type": "date"
+            },
+            "message": {
+              "type": "text"
+            },
+            "duration": {
+              "type": "long"
+            },
+            "status": {
+              "type": "short"
+            }
+          }
+        }
+      },
+      "_meta": {
+        "description": "Data stream for logs-ingress-*; lifecycle policy logs-ingress. Apply: PUT _index_template/logs-ingress"
+      }
+    }
+  },
+  {
+    "name": "logs-audit",
+    "body": {
+      "index_patterns": [
+        "logs-audit-*"
+      ],
+      "data_stream": {},
+      "priority": 200,
+      "template": {
+        "settings": {
+          "index.lifecycle.name": "logs-audit",
+          "number_of_shards": 1,
+          "number_of_replicas": 1,
+          "index.codec": "best_compression",
+          "index.mapping.total_fields.limit": 500
+        },
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keyword": {
+                "match_mapping_type": "string",
+                "mapping": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            }
+          ],
+          "properties": {
+            "@timestamp": {
+              "type": "date"
+            },
+            "message": {
+              "type": "text"
+            },
+            "duration": {
+              "type": "long"
+            },
+            "status": {
+              "type": "short"
+            }
+          }
+        }
+      },
+      "_meta": {
+        "description": "Data stream for logs-audit-*; lifecycle policy logs-audit. Apply: PUT _index_template/logs-audit"
+      }
+    }
+  }
+]

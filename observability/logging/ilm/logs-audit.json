@@ -1,0 +1,38 @@
+{
+  "policy": {
+    "_meta": {
+      "description": "Kubernetes and Vault audit logs: compliance retention 180 days, moved to cold tier after 30 days.",
+      "apply": "PUT _ilm/policy/logs-audit"
+    },
+    "phases": {
+      "hot": {
+        "actions": {
+          "rollover": {
+            "max_primary_shard_size": "20gb",
+            "max_age": "7d"
+          }
+        }
+      },
+      "cold": {
+        "min_age": "30d",
+        "actions": {
+          "allocate": {
+            "require": {
+              "data": "cold"
+            },
+            "number_of_replicas": 0
+          },
+          "set_priority": {
+            "priority": 0
+          }
+        }
+      },
+      "delete": {
+        "min_age": "180d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}

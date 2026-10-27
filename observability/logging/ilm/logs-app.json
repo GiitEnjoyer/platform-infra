@@ -1,0 +1,47 @@
+{
+  "policy": {
+    "_meta": {
+      "description": "Application logs: 3 days hot (SSD), then warm with forcemerge + shrink, deleted after 14 days.",
+      "apply": "PUT _ilm/policy/logs-app"
+    },
+    "phases": {
+      "hot": {
+        "actions": {
+          "rollover": {
+            "max_primary_shard_size": "30gb",
+            "max_age": "1d"
+          },
+          "set_priority": {
+            "priority": 100
+          }
+        }
+      },
+      "warm": {
+        "min_age": "3d",
+        "actions": {
+          "allocate": {
+            "require": {
+              "data": "warm"
+            },
+            "number_of_replicas": 0
+          },
+          "forcemerge": {
+            "max_num_segments": 1
+          },
+          "shrink": {
+            "number_of_shards": 1
+          },
+          "set_priority": {
+            "priority": 50
+          }
+        }
+      },
+      "delete": {
+        "min_age": "14d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}
